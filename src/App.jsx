@@ -53,16 +53,10 @@ const firebaseConfig = {
   measurementId: "G-DPCBN0B3KN"
 };
 
-// API KEY GEMINI CỦA BẠN
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-console.log("Kiểm tra Key:", GEMINI_API_KEY);
-// DANH SÁCH MODEL DỰ PHÒNG
-const GEMINI_MODELS = [
-  "gemini-2.5-flash", // Ưu tiên số 1: Nhanh, ổn định, cập nhật mới nhất
-  "gemini-2.0-flash",        // Dự phòng 1
-  "gemini-2.5-pro",   // Dự phòng 2: Thông minh hơn nhưng chậm hơn
-  "gemini-2.0-flash-lite"
-];
+
+// Mặc định sử dụng model ổn định nhất
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 // Khởi tạo Firebase
 const app = initializeApp(firebaseConfig);
@@ -226,13 +220,12 @@ export default function App() {
   };
 
   // --- API VISION (ẢNH) ---
-  const callGeminiWithFallback = async (base64Data, modelIndex = 0) => {
-    if (modelIndex >= GEMINI_MODELS.length) throw new Error("Hệ thống AI đang bận.");
-    const currentModel = GEMINI_MODELS[modelIndex];
+  const callGeminiWithFallback = async (base64Data, retryCount = 0) => {
+    if (retryCount >= 3) throw new Error("Hệ thống AI đang bận hoặc quá tải, vui lòng thử lại sau vài giây.");
 
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -246,10 +239,20 @@ export default function App() {
           })
         }
       );
-      if (!response.ok) return await callGeminiWithFallback(base64Data, modelIndex + 1);
+      if (!response.ok) {
+        if (response.status === 429 || response.status === 503) {
+          await new Promise(resolve => setTimeout(resolve, 1500 * (retryCount + 1))); // Delay 1.5s, 3s
+          return await callGeminiWithFallback(base64Data, retryCount + 1);
+        }
+        throw new Error("Lỗi kết nối API Gemini");
+      }
       return await response.json();
     } catch (error) {
-      return await callGeminiWithFallback(base64Data, modelIndex + 1);
+      if (retryCount < 2) {
+        await new Promise(resolve => setTimeout(resolve, 1500 * (retryCount + 1)));
+        return await callGeminiWithFallback(base64Data, retryCount + 1);
+      }
+      throw error;
     }
   };
 
@@ -628,7 +631,7 @@ export default function App() {
         </h3>
         {/* Thay h-48 bằng style={{ height: '200px' }} để đảm bảo Recharts luôn thấy được chiều cao */}
         <div className="w-full text-xs" style={{ height: '200px', minHeight: '200px' }}>
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
             <BarChart data={chartData}>
               <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: '#9CA3AF' }} />
               <Tooltip
