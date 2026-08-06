@@ -4,14 +4,13 @@ import InfoPage from './Info';
 import { BookOpen } from 'lucide-react';
 import Login from './Login';
 // 1. IMPORT CÁC THƯ VIỆN
+import { analyzeImage, analyzeText } from './api';
 import { initializeApp } from "firebase/app";
 import {
   getAuth,
-  signInWithPopup,
-  GoogleAuthProvider,
   signOut,
   onAuthStateChanged
-} from "firebase/auth";
+} from "firebase/auth"; 
 import {
   getFirestore,
   collection,
@@ -21,6 +20,7 @@ import {
   onSnapshot,
   query,
   orderBy,
+  where,
   getDoc,
   setDoc
 } from "firebase/firestore";
@@ -38,7 +38,7 @@ import {
 import {
   Utensils, Trash2, Flame, Scale,
   RotateCcw, Info, ChevronRight, ChevronLeft, Calendar,
-  Home, User, Plus, Download, Settings, Edit2,
+  Home, User, Plus, Download, Settings, Edit2, Heart,
   Camera, Loader2, Sun, Moon, Coffee, X, Sparkles, Weight, BarChart2
 } from 'lucide-react';
 
@@ -53,16 +53,32 @@ const firebaseConfig = {
   measurementId: "G-DPCBN0B3KN"
 };
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-
-// Mặc định sử dụng model ổn định nhất
-const GEMINI_MODEL = "gemini-2.5-flash";
+// LƯU Ý BẢO MẬT: mọi lời gọi Gemini giờ đi qua backend (xem src/api.js
+// và thư mục server/) - API key không còn nằm trong bundle của client.
 
 // Khởi tạo Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const googleProvider = new GoogleAuthProvider();
+
+// --- HELPER: NGÀY THEO GIỜ ĐỊA PHƯƠNG ---
+// Lưu ý: KHÔNG dùng toISOString() vì nó trả về ngày theo UTC.
+// Ở Việt Nam (UTC+7), trước 7h sáng toISOString() sẽ ra... ngày hôm trước.
+const getLocalDateString = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+// Chuyển chuỗi "YYYY-MM-DD" thành Date theo giờ địa phương
+// (new Date("YYYY-MM-DD") sẽ hiểu là nửa đêm UTC → sai ngày)
+const parseLocalDate = (dateStr) => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+
+// (Việc làm sạch/validate kết quả AI giờ do server đảm nhiệm - xem server/src/gemini.js)
 
 // 3. DỮ LIỆU MẪU
 const COMMON_FOODS = [
@@ -88,36 +104,14 @@ const ACTIVITY_LEVELS = [
   { val: '2.2', label: 'Hoạt động mạnh mẽ', desc: 'Nông nghiệp, bơi 2h/ngày' },
   { val: '2.4', label: 'Cực kỳ năng động', desc: 'Vận động viên chuyên nghiệp' },
 ];
-// 4. MÀN HÌNH ĐĂNG NHẬP
-const LoginScreen = ({ onLogin }) => (
-  <div className="min-h-screen bg-emerald-600 flex items-center justify-center p-4 font-sans">
-    <div className="bg-white w-full max-w-sm rounded-3xl p-8 shadow-2xl text-center">
-      <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
-        <Flame className="w-10 h-10 text-emerald-600 fill-emerald-600" />
-      </div>
-      <h1 className="text-3xl font-extrabold text-gray-800 mb-2">VietFit Pro</h1>
-      <p className="text-gray-500 mb-8 font-medium">Trợ lý dinh dưỡng AI của bạn</p>
-
-      <button
-        onClick={onLogin}
-        className="w-full bg-white border-2 border-gray-100 text-gray-700 font-bold py-4 rounded-xl hover:bg-gray-50 hover:border-emerald-200 transition-all flex items-center justify-center gap-3 active:scale-95 shadow-sm"
-      >
-        <div className="w-6 h-6">
-          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g transform="matrix(1, 0, 0, 1, 27.009001, -39.238998)"><path fill="#4285F4" d="M -3.264 51.509 C -3.264 50.719 -3.334 49.969 -3.454 49.239 L -14.754 49.239 L -14.754 53.749 L -8.284 53.749 C -8.574 55.229 -9.424 56.479 -10.684 57.329 L -10.684 60.329 L -6.824 60.329 C -4.564 58.239 -3.264 55.159 -3.264 51.509 Z" /><path fill="#34A853" d="M -14.754 63.239 C -11.514 63.239 -8.804 62.159 -6.824 60.329 L -10.684 57.329 C -11.764 58.049 -13.134 58.489 -14.754 58.489 C -17.884 58.489 -20.534 56.379 -21.484 53.529 L -25.464 53.529 L -25.464 56.619 C -23.494 60.539 -19.444 63.239 -14.754 63.239 Z" /><path fill="#FBBC05" d="M -21.484 53.529 C -21.734 52.809 -21.864 52.039 -21.864 51.239 C -21.864 50.439 -21.724 49.669 -21.484 48.949 L -21.484 45.859 L -25.464 45.859 C -26.284 47.479 -26.754 49.299 -26.754 51.239 C -26.754 53.179 -26.284 54.999 -25.464 56.619 L -21.484 53.529 Z" /><path fill="#EA4335" d="M -14.754 43.989 C -12.984 43.989 -11.404 44.599 -10.154 45.789 L -6.734 42.369 C -8.804 40.429 -11.514 39.239 -14.754 39.239 C -19.444 39.239 -23.494 41.939 -25.464 45.859 L -21.484 48.949 C -20.534 46.099 -17.884 43.989 -14.754 43.989 Z" /></g></svg>
-        </div>
-        Đăng nhập với Google
-      </button>
-    </div>
-  </div>
-);
-
-// 5. APP CHÍNH
+// 4. APP CHÍNH
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // User State
-  const [userInfo, setUserInfo] = useState({ gender: 'male', age: 25, height: 170, weight: 70, activityLevel: '1.375' });
+  // Lưu ý: activityLevel phải là một giá trị có trong ACTIVITY_LEVELS
+  const [userInfo, setUserInfo] = useState({ gender: 'male', age: 25, height: 170, weight: 70, activityLevel: '1.5' });
   const [step, setStep] = useState(1);
   const [activeTab, setActiveTab] = useState('home');
   const [tdee, setTdee] = useState(0);
@@ -125,7 +119,7 @@ export default function App() {
 
   // Data State
   const [meals, setMeals] = useState([]);
-  const [currentDate, setCurrentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [currentDate, setCurrentDate] = useState(getLocalDateString());
 
   // Form State
   const [newMealName, setNewMealName] = useState('');
@@ -145,8 +139,14 @@ export default function App() {
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 1000);
 
+    // Giữ tham chiếu để hủy listener meals khi đổi user / unmount
+    // (trước đây listener không được hủy → leak + chồng listener sau mỗi lần đăng nhập lại)
+    let mealsUnsub = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       clearTimeout(timer);
+      if (mealsUnsub) { mealsUnsub(); mealsUnsub = null; }
+
       if (user) {
         setCurrentUser(user);
         try {
@@ -166,10 +166,24 @@ export default function App() {
           console.error("Lỗi tải profile:", error);
         }
 
-        const q = query(collection(db, "users", user.uid, "meals"), orderBy("createdAt", "desc"));
-        onSnapshot(q, (snapshot) => {
+        // Chỉ tải 30 ngày gần nhất thay vì toàn bộ lịch sử
+        // (tránh chậm dần và tốn quota đọc Firestore khi dữ liệu lớn lên)
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - 30);
+        const cutoff = getLocalDateString(cutoffDate);
+
+        const q = query(
+          collection(db, "users", user.uid, "meals"),
+          where("date", ">=", cutoff),
+          orderBy("date", "desc")
+        );
+        mealsUnsub = onSnapshot(q, (snapshot) => {
           const loadedMeals = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          // Sắp xếp món mới thêm lên trước trong cùng một ngày
+          loadedMeals.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
           setMeals(loadedMeals);
+        }, (error) => {
+          console.error("Lỗi tải dữ liệu bữa ăn:", error);
         });
       } else {
         setCurrentUser(null);
@@ -178,17 +192,20 @@ export default function App() {
       }
       setLoading(false);
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (mealsUnsub) mealsUnsub();
+    };
   }, []);
 
   const changeDate = (days) => {
-    const date = new Date(currentDate);
+    const date = parseLocalDate(currentDate);
     date.setDate(date.getDate() + days);
-    setCurrentDate(date.toISOString().slice(0, 10));
+    setCurrentDate(getLocalDateString(date));
   };
 
   const getDisplayDate = () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getLocalDateString();
     if (currentDate === today) return "Hôm nay";
     const [y, m, d] = currentDate.split('-');
     return `${d}/${m}/${y}`;
@@ -196,17 +213,25 @@ export default function App() {
 
   // --- HÀM NÉN ẢNH ---
   const compressImage = (file) => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      // Chặn file không phải ảnh (trước đây sẽ treo im lặng, VD ảnh HEIC trên iPhone)
+      if (!file.type || !file.type.startsWith('image/')) {
+        reject(new Error("File không phải là ảnh. Hãy chọn ảnh JPG hoặc PNG."));
+        return;
+      }
       const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Không đọc được file ảnh."));
       reader.readAsDataURL(file);
       reader.onload = (event) => {
         const img = new Image();
+        img.onerror = () => reject(new Error("Định dạng ảnh không được hỗ trợ. Hãy thử JPG hoặc PNG."));
         img.src = event.target.result;
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const scale = 800 / img.width;
-          canvas.width = 800;
-          canvas.height = img.height * scale;
+          // Không phóng to ảnh nhỏ hơn 800px (upscale chỉ làm ảnh mờ và nặng thêm)
+          const scale = Math.min(1, 800 / img.width);
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
           const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
@@ -219,103 +244,6 @@ export default function App() {
     });
   };
 
-  // --- API VISION (ẢNH) ---
-  const callGeminiWithFallback = async (base64Data, retryCount = 0) => {
-    if (retryCount >= 3) throw new Error("Hệ thống AI đang bận hoặc quá tải, vui lòng thử lại sau vài giây.");
-
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: "Bạn là chuyên gia dinh dưỡng. Nhìn ảnh này. Trả về kết quả CHỈ LÀ MỘT JSON duy nhất: { \"name\": \"Tên món tiếng Việt ngắn gọn\", \"weight\": số_gam_ước_lượng, \"calories\": số_calo_nguyên, \"carbs\": số_gam_carb, \"protein\": số_gam_đạm, \"fat\": số_gam_béo, \"fiber\": số_gam_xơ }. Không thêm dấu ```json." },
-                { inline_data: { mime_type: "image/jpeg", data: base64Data } }
-              ]
-            }]
-          })
-        }
-      );
-      if (!response.ok) {
-        if (response.status === 429 || response.status === 503) {
-          await new Promise(resolve => setTimeout(resolve, 1500 * (retryCount + 1))); // Delay 1.5s, 3s
-          return await callGeminiWithFallback(base64Data, retryCount + 1);
-        }
-        throw new Error("Lỗi kết nối API Gemini");
-      }
-      return await response.json();
-    } catch (error) {
-      if (retryCount < 2) {
-        await new Promise(resolve => setTimeout(resolve, 1500 * (retryCount + 1)));
-        return await callGeminiWithFallback(base64Data, retryCount + 1);
-      }
-      throw error;
-    }
-  };
-
-  // --- API TEXT ---
-  const callGeminiTextOnly = async (foodName) => {
-    if (!foodName.trim()) return null;
-
-    const model = "gemini-2.5-flash";
-    // Sử dụng v1beta vì nó hỗ trợ tốt nhất cho response_mime_type
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-
-    try {
-      const response = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `Ước lượng dinh dưỡng món: "${foodName}". Trả về JSON: {"name": "Tên", "weight": 100, "calories": 100, "carbs": 10, "protein": 5, "fat": 2, "fiber": 1}. Không giải thích.`
-            }]
-          }],
-
-          generationConfig: {
-            responseMimeType: "application/json", // Chuyển thành camelCase cho khớp với JS object gửi đi
-            temperature: 0.1
-          }
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error("Chi tiết lỗi:", errorData);
-
-        // Nếu vẫn lỗi về responseMimeType, ta sẽ thử cách thô sơ nhất (xóa nó đi)
-        if (errorData.error?.message?.includes("mime_type")) {
-          return await callGeminiBackup(foodName);
-        }
-        return null;
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error("Lỗi kết nối:", error);
-      return null;
-    }
-  };
-
-  // Hàm dự phòng trường hợp API kén chọn cấu trúc JSON
-  const callGeminiBackup = async (foodName) => {
-    const model = "gemini-2.5-flash";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{ text: `Ước lượng dinh dưỡng món "${foodName}" trả về duy nhất 1 dòng JSON {name, calories, protein, fat, carbs, weight, fiber}` }]
-        }]
-      })
-    });
-    return await response.json();
-  };
   // --- XỬ LÝ ẢNH ---
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
@@ -326,33 +254,20 @@ export default function App() {
 
     try {
       const { base64, preview } = await compressImage(file);
-      const data = await callGeminiWithFallback(base64);
+      // Server nhận diện, làm sạch dữ liệu và trả về object hoàn chỉnh
+      const resultData = await analyzeImage(base64);
 
-      if (data && data.candidates && data.candidates[0].content) {
-        const text = data.candidates[0].content.parts[0].text;
-        const cleanText = text.replace(/```json|```/g, '').trim();
-        const firstBrace = cleanText.indexOf('{');
-        const lastBrace = cleanText.lastIndexOf('}');
-
-        if (firstBrace !== -1 && lastBrace !== -1) {
-          const finalJson = cleanText.substring(firstBrace, lastBrace + 1);
-          const resultData = JSON.parse(finalJson);
-
-          setOriginalNutrients({ ...resultData }); // Lưu mốc gốc
-          setScanResult({ ...resultData, image: preview });
-          setNewMealName(resultData.name);
-          setNewMealWeight(resultData.weight || 100);
-          setNewMealCalories(resultData.calories);
-          setNewMealMacros({
-            carbs: resultData.carbs || 0,
-            protein: resultData.protein || 0,
-            fat: resultData.fat || 0,
-            fiber: resultData.fiber || 0
-          });
-        } else {
-          throw new Error("AI không nhận diện được món ăn.");
-        }
-      }
+      setOriginalNutrients({ ...resultData }); // Lưu mốc gốc
+      setScanResult({ ...resultData, image: preview });
+      setNewMealName(resultData.name);
+      setNewMealWeight(resultData.weight);
+      setNewMealCalories(resultData.calories);
+      setNewMealMacros({
+        carbs: resultData.carbs,
+        protein: resultData.protein,
+        fat: resultData.fat,
+        fiber: resultData.fiber
+      });
     } catch (error) {
       alert(`⚠️ Không thể nhận diện ảnh: ${error.message}`);
     } finally {
@@ -375,50 +290,68 @@ export default function App() {
 
     setIsTextSearching(true);
     try {
-      const data = await callGeminiTextOnly(newMealName);
+      // Server tra cache trước (món phổ biến trả về tức thì, không tốn lượt AI),
+      // chưa có cache mới gọi Gemini - kết quả đã được server làm sạch
+      const result = await analyzeText(newMealName);
 
-      if (data && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        const result = JSON.parse(data.candidates[0].content.parts[0].text);
-
-        setOriginalNutrients({ ...result });
-        setNewMealName(result.name);
-        setNewMealWeight(result.weight || 100);
-        setNewMealCalories(result.calories);
-        setNewMealMacros({
-          carbs: result.carbs || 0,
-          protein: result.protein || 0,
-          fat: result.fat || 0,
-          fiber: result.fiber || 0
-        });
-      } else {
-        alert("AI đang bận hoặc không nhận diện được món này. Bạn hãy tự nhập nhé!");
-      }
+      setOriginalNutrients({ ...result });
+      setNewMealName(result.name);
+      setNewMealWeight(result.weight);
+      setNewMealCalories(result.calories);
+      setNewMealMacros({
+        carbs: result.carbs,
+        protein: result.protein,
+        fat: result.fat,
+        fiber: result.fiber
+      });
     } catch (error) {
-      console.error("Lỗi phân tích JSON:", error);
+      alert(error.message || "AI đang bận hoặc không nhận diện được món này. Bạn hãy tự nhập nhé!");
     } finally {
       setIsTextSearching(false);
     }
   };
   // --- CÁC HÀM FIREBASE lưu dữ liệu ---
   const saveUserProfile = async () => {
-    // 1. Tính BMR (Cơ sở năng lượng)
-    let bmr = userInfo.gender === 'male'
-      ? (10 * userInfo.weight) + (6.25 * userInfo.height) - (5 * userInfo.age) + 5
-      : (10 * userInfo.weight) + (6.25 * userInfo.height) - (5 * userInfo.age) - 161;
+    // 0. Kiểm tra dữ liệu nhập (input trả về chuỗi, có thể rỗng/âm/vô lý → BMR ra NaN)
+    const age = parseFloat(userInfo.age);
+    const height = parseFloat(userInfo.height);
+    const weight = parseFloat(userInfo.weight);
+
+    if (!(age >= 10 && age <= 100)) {
+      alert("Tuổi không hợp lệ. Hãy nhập từ 10 đến 100.");
+      return;
+    }
+    if (!(height >= 100 && height <= 250)) {
+      alert("Chiều cao không hợp lệ. Hãy nhập từ 100 đến 250 cm.");
+      return;
+    }
+    if (!(weight >= 25 && weight <= 300)) {
+      alert("Cân nặng không hợp lệ. Hãy nhập từ 25 đến 300 kg.");
+      return;
+    }
+
+    const validatedInfo = { ...userInfo, age, height, weight };
+
+    // 1. Tính BMR (Cơ sở năng lượng) — công thức Mifflin-St Jeor
+    let bmr = validatedInfo.gender === 'male'
+      ? (10 * weight) + (6.25 * height) - (5 * age) + 5
+      : (10 * weight) + (6.25 * height) - (5 * age) - 161;
 
     // 2. Tính TDEE sử dụng hệ số PAL từ bảng mức độ vận động
-    const pal = parseFloat(userInfo.activityLevel || 1.5); // Mặc định 1.5 nếu chưa chọn
+    const pal = parseFloat(validatedInfo.activityLevel) || 1.5; // Mặc định 1.5 nếu chưa chọn
     const tdeeVal = Math.round(bmr * pal);
 
-    // 3. Tính mục tiêu calo (Ví dụ: giảm 500 calo để giảm cân an toàn)
-    const targetVal = tdeeVal - 500;
+    // 3. Tính mục tiêu calo (giảm 500 calo để giảm cân an toàn),
+    //    không cho thấp hơn ngưỡng tối thiểu an toàn 1000 kcal/ngày
+    const targetVal = Math.max(tdeeVal - 500, 1000);
 
+    setUserInfo(validatedInfo);
     setTdee(tdeeVal);
     setTargetCalories(targetVal);
 
     try {
       await setDoc(doc(db, "users", currentUser.uid), {
-        userInfo: userInfo, // userInfo lúc này đã bao gồm activityLevel mới
+        userInfo: validatedInfo, // đã ép kiểu số + gồm activityLevel mới
         tdee: tdeeVal,
         targetCalories: targetVal,
         updatedAt: new Date().toISOString()
@@ -510,11 +443,6 @@ export default function App() {
     }
   };
 
-  const handleGoogleLogin = async () => {
-    try { await signInWithPopup(auth, googleProvider); }
-    catch (e) { alert("Lỗi đăng nhập Google: " + e.message); }
-  };
-
   const handleLogout = () => { signOut(auth); setStep(1); setMeals([]); setActiveTab('home'); };
   const handleInputChange = (e) => setUserInfo({ ...userInfo, [e.target.name]: e.target.value });
 
@@ -545,9 +473,10 @@ export default function App() {
     const bom = '\uFEFF';
     const blob = new Blob([bom + csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); 
-    link.href = url; 
-    link.download = `vietfit_baocao_${currentDate}.csv`;
+    const link = document.createElement('a');
+    link.href = url;
+    // File chứa dữ liệu 30 ngày gần nhất → đặt tên theo ngày xuất, không theo ngày đang xem
+    link.download = `vietfit_baocao_30ngay_${getLocalDateString()}.csv`;
     document.body.appendChild(link); 
     link.click(); 
     document.body.removeChild(link);
@@ -556,10 +485,14 @@ export default function App() {
   const editProfile = () => { setStep(1); };
 
   // --- TÍNH TOÁN CALO ---
+  // Number(...) || 0: phòng dữ liệu cũ lưu calo dạng chuỗi (cộng chuỗi sẽ thành nối chuỗi)
   const mealsByDate = meals.filter(meal => meal.date === currentDate);
-  const totalCaloriesConsumed = mealsByDate.reduce((acc, meal) => acc + meal.calories, 0);
+  const totalCaloriesConsumed = mealsByDate.reduce((acc, meal) => acc + (Number(meal.calories) || 0), 0);
   const remainingCalories = targetCalories - totalCaloriesConsumed;
-  const progressPercentage = Math.min((totalCaloriesConsumed / targetCalories) * 100, 100);
+  // Guard chia cho 0: khi chưa có mục tiêu, progress = 0 thay vì NaN
+  const progressPercentage = targetCalories > 0
+    ? Math.min((totalCaloriesConsumed / targetCalories) * 100, 100)
+    : 0;
 
   // --- LOGIC XỬ LÝ DỮ LIỆU BIỂU ĐỒ (7 NGÀY) ---
   const getLast7DaysData = () => {
@@ -567,12 +500,12 @@ export default function App() {
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const dateKey = d.toISOString().slice(0, 10);
+      const dateKey = getLocalDateString(d); // Ngày theo giờ địa phương, không dùng UTC
       const displayDay = `${d.getDate()}/${d.getMonth() + 1}`; // VD: 28/1
 
       // Lọc món ăn trong ngày đó
       const mealsInDay = meals.filter(m => m.date === dateKey);
-      const totalCal = mealsInDay.reduce((acc, m) => acc + m.calories, 0);
+      const totalCal = mealsInDay.reduce((acc, m) => acc + (Number(m.calories) || 0), 0);
 
       data.push({
         day: displayDay,
@@ -657,7 +590,7 @@ export default function App() {
       <div>
         {MEAL_TYPES.map((type) => {
           const typeMeals = mealsByDate.filter(m => m.type === type.id);
-          const typeCalories = typeMeals.reduce((acc, m) => acc + m.calories, 0);
+          const typeCalories = typeMeals.reduce((acc, m) => acc + (Number(m.calories) || 0), 0);
           return (
             <div key={type.id} className="mb-6">
               <div className="flex justify-between items-center mb-3 px-2">
@@ -1037,7 +970,7 @@ export default function App() {
             </button>
           </div>
           <button onClick={() => setActiveTab('health')} className={`flex flex-col items-center gap-1 p-2 transition-colors ${activeTab === 'health' ? 'text-emerald-600' : 'text-gray-300 hover:text-gray-400'}`}>
-            <User size={24} strokeWidth={activeTab === 'health' ? 2.5 : 2} />
+            <Heart size={24} strokeWidth={activeTab === 'health' ? 2.5 : 2} />
             <span className="text-[10px] font-bold">Sức khỏe</span>
           </button>
           <button onClick={() => setActiveTab('profile')} className={`flex flex-col items-center gap-1 p-2 transition-colors ${activeTab === 'profile' ? 'text-emerald-600' : 'text-gray-300 hover:text-gray-400'}`}>

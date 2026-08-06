@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getHealthAdvice } from './api';
 import { doc, getDoc, getFirestore } from "firebase/firestore";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { 
@@ -19,33 +20,6 @@ export default function HealthPage() {
 
   const db = getFirestore();
   const auth = getAuth();
-  const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-  const GEMINI_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-2.5-pro",
-    "gemini-2.0-flash-lite"
-  ];
-
-  const callGeminiHealth = async (prompt, modelIndex = 0) => {
-    if (modelIndex >= GEMINI_MODELS.length) throw new Error("Hệ thống AI đang bận.");
-    const currentModel = GEMINI_MODELS[modelIndex];
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-        }
-      );
-      if (!response.ok) return await callGeminiHealth(prompt, modelIndex + 1);
-      const data = await response.json();
-      return data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    } catch (err) {
-      return await callGeminiHealth(prompt, modelIndex + 1);
-    }
-  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -72,37 +46,22 @@ export default function HealthPage() {
   const getAIAdvice = async () => {
     if (!userProfile) return;
     setIsAnalyzing(true);
-    
+
     const heightM = userProfile.height / 100;
     const bmi = (userProfile.weight / (heightM * heightM)).toFixed(1);
 
-    const statusMap = {
-      tired: "mệt mỏi, thiếu năng lượng",
-      normal: "bình thường",
-      energetic: "sung sức, muốn tập luyện mạnh",
-      sore: "đang bị đau nhức cơ bắp"
-    };
-
-    // Prompt kết hợp cả trạng thái chọn và nội dung người dùng nhập
-    const prompt = `Bạn là chuyên gia dinh dưỡng VietFit.
-    Bệnh nhân: ${userProfile.gender === 'male' ? 'Nam' : 'Nữ'}, BMI ${bmi}.
-    Trạng thái hôm nay: Người dùng cảm thấy ${statusMap[dailyStatus]}.
-    Ghi chú chi tiết từ người dùng: "${detailedStatus || 'Không có ghi chú thêm'}"
-    Dựa vào thông tin trên, hãy đưa ra:
-    1. Lời khuyên chẩn đoán ngắn gọn, bám sát ghi chú chi tiết nếu có.
-    2. Đề xuất 3 món ăn Việt phù hợp nhất hôm nay (kèm calo).
-    3. Đề xuất 3 bài tập phù hợp.
-    TRẢ VỀ JSON DUY NHẤT: {"diagnosis": "...", "foods": [{"name": "...", "cal": 0}], "exercises": ["..."]}`;
-
     try {
-      const rawText = await callGeminiHealth(prompt);
-      const jsonStart = rawText.indexOf('{');
-      const jsonEnd = rawText.lastIndexOf('}');
-      if (jsonStart !== -1 && jsonEnd !== -1) {
-        setDiagnosis(JSON.parse(rawText.substring(jsonStart, jsonEnd + 1)));
-      }
+      // Server dựng prompt, gọi Gemini (tự đổi model dự phòng khi bận)
+      // và validate cấu trúc kết quả trước khi trả về
+      const advice = await getHealthAdvice({
+        gender: userProfile.gender,
+        bmi,
+        status: dailyStatus,
+        note: detailedStatus
+      });
+      setDiagnosis(advice);
     } catch (err) {
-      alert("AI đang bận, Toàn hãy thử lại nhé!");
+      alert(err.message || "AI đang bận, bạn hãy thử lại sau nhé!");
     } finally {
       setIsAnalyzing(false);
     }
