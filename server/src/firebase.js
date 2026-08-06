@@ -9,8 +9,26 @@ import { readFileSync, existsSync } from "node:fs";
 
 const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
+// Trên Vercel/Cloud không upload file được -> dán nội dung JSON của
+// service account vào biến môi trường FIREBASE_SERVICE_ACCOUNT
+// (dán nguyên JSON, hoặc chuỗi base64 của JSON đều được)
+const parseServiceAccountEnv = (raw) => {
+  try {
+    return JSON.parse(raw); // thử JSON thuần trước
+  } catch {
+    return JSON.parse(Buffer.from(raw, "base64").toString("utf8")); // thử base64
+  }
+};
+
 let credential;
-if (credPath && existsSync(credPath)) {
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  const serviceAccount = parseServiceAccountEnv(process.env.FIREBASE_SERVICE_ACCOUNT);
+  console.log(`🔑 Đã nạp service account từ biến môi trường (project: ${serviceAccount.project_id})`);
+  if (serviceAccount.project_id !== "vietfit") {
+    console.warn(`⚠️  Service account thuộc project "${serviceAccount.project_id}" - client đang dùng project "vietfit", verify token sẽ 401.`);
+  }
+  credential = cert(serviceAccount);
+} else if (credPath && existsSync(credPath)) {
   const serviceAccount = JSON.parse(readFileSync(credPath, "utf8"));
   console.log(`🔑 Đã nạp service account: ${credPath} (project: ${serviceAccount.project_id})`);
   if (serviceAccount.project_id !== "vietfit") {
